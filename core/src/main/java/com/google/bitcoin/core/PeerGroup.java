@@ -137,7 +137,7 @@ public class PeerGroup extends AbstractExecutionThreadService implements Transac
             recalculateFastCatchupAndFilter(false);
         }
         @Override public void onScriptsAdded(Wallet wallet, List<Script> scripts) { onChanged(); }
-        @Override public void onKeysAdded(Wallet wallet, List<ECKey> keys) { onChanged(); }
+        @Override public void onKeysAdded(List<ECKey> keys) { onChanged(); }
         @Override public void onCoinsReceived(Wallet wallet, Transaction tx, BigInteger prevBalance, BigInteger newBalance) { onChanged(); }
         @Override public void onCoinsSent(Wallet wallet, Transaction tx, BigInteger prevBalance, BigInteger newBalance) { onChanged(); }
     };
