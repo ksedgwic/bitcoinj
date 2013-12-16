@@ -244,16 +244,16 @@ public class BasicKeyChain implements EncryptableKeyChain {
         for (ECKey key : cryptedKeys)
             importKeyLocked(key);
         this.keyCrypter = keyCrypter;
-        queueOnEncrypt();
+        queueOnEncryptionChanged();
     }
 
-    private void queueOnEncrypt() {
+    private void queueOnEncryptionChanged() {
         checkState(lock.isHeldByCurrentThread());
         for (final ListenerRegistration<KeyChainEventListener> registration : listeners) {
             registration.executor.execute(new Runnable() {
                 @Override
                 public void run() {
-                    registration.listener.onEncrypt();
+                    registration.listener.onEncryptionChanged();
                 }
             });
         }
