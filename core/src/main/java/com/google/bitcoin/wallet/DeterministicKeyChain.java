@@ -86,7 +86,11 @@ public class DeterministicKeyChain implements KeyChain {
 
     /** Returns a list of words that represent the seed. */
     public List<String> toMnemonicCode(MnemonicCode code) {
-        return code.encode(seed);
+        try {
+            return code.toMnemonic(seed);
+        } catch (MnemonicLengthException e) {
+            throw new RuntimeException(e);  // Cannot happen.
+        }
     }
 
     private MnemonicCode getCachedMnemonicCode() throws IOException {

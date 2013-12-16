@@ -41,8 +41,7 @@ public class DeterministicKeyChainTest {
 
     @Test
     public void mnemonicCode() throws Exception {
-        assertEquals("bottom report power sport attack truly trim course prevent rely boost pass suggest begin " +
-                     "argue same change armor pen blind ugly nerve awesome purity",
+        assertEquals("aerobic toe save section draw warm cute upon raccoon mother priority pilot taste sweet next traffic fatal sword dentist original crisp team caution rebel",
                 Joiner.on(" ").join(chain.toMnemonicCode()));
     }
 
