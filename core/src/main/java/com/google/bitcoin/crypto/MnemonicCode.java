@@ -17,6 +17,7 @@
 package com.google.bitcoin.crypto;
 
 import com.google.bitcoin.core.Sha256Hash;
+import com.google.common.base.Joiner;
 import org.spongycastle.util.encoders.Hex;
 
 import java.io.BufferedReader;
@@ -26,7 +27,6 @@ import java.io.InputStreamReader;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -41,7 +41,7 @@ public class MnemonicCode {
 
     public static String BIP39_ENGLISH_SHA256 = "ad90bf3beb7b0eb7e5acd74727dc0da96e0a280a258354e7293fb7e211ac03db";
 
-    private static final int HMAC_ROUNDS = 10000;
+    private static final int PBKDF2_ROUNDS = 4096;
 
     public MnemonicCode() throws IOException {
         this(MnemonicCode.class.getResourceAsStream("mnemonic/wordlist/english.txt"), BIP39_ENGLISH_SHA256);
@@ -84,79 +84,25 @@ public class MnemonicCode {
      */
     public static byte[] toSeed(List<String> words, String passphrase) {
 
-        // To create binary seed from mnemonic, we use HMAC-SHA512
-        // function with string "mnemonic" + passphrase (in UTF-8) as
-        // key and mnemonic sentence (again in UTF-8) as the
-        // message. We perform 10000 HMAC rounds and use the final
-        // result as the binary seed.
+        // To create binary seed from mnemonic, we use PBKDF2 function
+        // with mnemonic sentence (in UTF-8) used as a password and
+        // string "mnemonic" + passphrase (again in UTF-8) used as a
+        // salt. Iteration count is set to 4096 and HMAC-SHA512 is
+        // used as a pseudo-random function. Desired length of the
+        // derived key is 512 bits (= 64 bytes).
         //
-        // Pseudocode:
-        //
-        // K = "mnemonic" + passphrase
-        // M = mnemonic_sentence
-        // for i in 1 ... 10000 do
-        //     M = hmac_sha512(K, M)
-        // done
-        // seed = M
+        String pass = Joiner.on(' ').join(words);
+        String salt = "mnemonic" + passphrase;
 
-        byte[] kk = new String("mnemonic" + passphrase).getBytes();
-        byte[] mm = joinStringList(words).getBytes();
-
-        for (int ii = 0; ii < HMAC_ROUNDS; ++ii)
-            mm = HDUtils.hmacSha512(kk, mm);
-
-        return mm;
+        return PBKDF2SHA512.derive(pass, salt, PBKDF2_ROUNDS, 64);
     }
 
     /**
-     * Convert entropy data to mnemonic word list.
+     * Convert mnemonic word list to original entropy value.
      */
-    public List<String> toMnemonic(byte[] entropy) throws MnemonicLengthException {
-        if (entropy.length % 4 > 0)
-            throw new MnemonicLengthException("entropy length not multiple of 32 bits");
-
-        // We take initial entropy of ENT bits and compute its
-        // checksum by taking first ENT / 32 bits of its SHA256 hash.
-
-        byte[] hash = Sha256Hash.create(entropy).getBytes();
-        boolean[] hashBits = bytesToBits(hash);
-        
-        boolean[] entropyBits = bytesToBits(entropy);
-        int checksumLengthBits = entropyBits.length / 32;
-
-        // We append these bits to the end of the initial entropy. 
-        boolean[] concatBits = new boolean[entropyBits.length + checksumLengthBits];
-        for (int ii = 0; ii < entropyBits.length; ++ii)
-            concatBits[ii] = entropyBits[ii];
-        for (int ii = 0; ii < checksumLengthBits; ++ii)
-            concatBits[entropyBits.length + ii] = hashBits[ii];
-
-        // Next we take these concatenated bits and split them into
-        // groups of 11 bits. Each group encodes number from 0-2047
-        // which is a position in a wordlist.  We convert numbers into
-        // words and use joined words as mnemonic sentence.
-
-        ArrayList<String> words = new ArrayList<String>();
-        int nwords = concatBits.length / 11;
-        for (int ii = 0; ii < nwords; ++ii) {
-            int ndx = 0;
-            for (int jj = 0; jj < 11; ++jj) {
-                ndx <<= 1;
-                if (concatBits[(ii * 11) + jj])
-                    ndx |= 0x1;
-            }
-            words.add(this.wordList.get(ndx));
-        }
-            
-        return words;        
-    }
-
-    /**
-     * Check to see if a mnemonic word list is valid.
-     */
-    public void check(List<String> words) throws MnemonicLengthException, MnemonicWordException, MnemonicChecksumException {
+    public byte[] toEntropy(List<String> words) throws MnemonicException.MnemonicLengthException, MnemonicException.MnemonicWordException, MnemonicException.MnemonicChecksumException {
         if (words.size() % 3 > 0)
-            throw new MnemonicLengthException("Word list size must be multiple of three words.");
+            throw new MnemonicException.MnemonicLengthException("Word list size must be multiple of three words.");
 
         // Look up all the words in the list and construct the
         // concatenation of the original entropy and the checksum.
@@ -168,7 +114,7 @@ public class MnemonicCode {
             // Find the words index in the wordlist.
             int ndx = Collections.binarySearch(this.wordList, word);
             if (ndx < 0)
-                throw new MnemonicWordException("\"" + word + "\" invalid", word);
+                throw new MnemonicException.MnemonicWordException(word);
 
             // Set the next 11 bits to the value of the index.
             for (int ii = 0; ii < 11; ++ii)
@@ -191,30 +137,66 @@ public class MnemonicCode {
         boolean[] hashBits = bytesToBits(hash);
 
         // Check all the checksum bits.
-        for (int ii = 0; ii < checksumLengthBits; ++ii)
-            if (concatBits[entropyLengthBits + ii] != hashBits[ii])
-                throw new MnemonicChecksumException("checksum error");
+        for (int i = 0; i < checksumLengthBits; ++i)
+            if (concatBits[entropyLengthBits + i] != hashBits[i])
+                throw new MnemonicException.MnemonicChecksumException();
+
+        return entropy;
+    }
+
+    /**
+     * Convert entropy data to mnemonic word list.
+     */
+    public List<String> toMnemonic(byte[] entropy) throws MnemonicException.MnemonicLengthException {
+        if (entropy.length % 4 > 0)
+            throw new MnemonicException.MnemonicLengthException("entropy length not multiple of 32 bits");
+
+        // We take initial entropy of ENT bits and compute its
+        // checksum by taking first ENT / 32 bits of its SHA256 hash.
+
+        byte[] hash = Sha256Hash.create(entropy).getBytes();
+        boolean[] hashBits = bytesToBits(hash);
+        
+        boolean[] entropyBits = bytesToBits(entropy);
+        int checksumLengthBits = entropyBits.length / 32;
+
+        // We append these bits to the end of the initial entropy. 
+        boolean[] concatBits = new boolean[entropyBits.length + checksumLengthBits];
+        System.arraycopy(entropyBits, 0, concatBits, 0, entropyBits.length);
+        System.arraycopy(hashBits, 0, concatBits, entropyBits.length, checksumLengthBits);
+
+        // Next we take these concatenated bits and split them into
+        // groups of 11 bits. Each group encodes number from 0-2047
+        // which is a position in a wordlist.  We convert numbers into
+        // words and use joined words as mnemonic sentence.
+
+        ArrayList<String> words = new ArrayList<String>();
+        int nwords = concatBits.length / 11;
+        for (int i = 0; i < nwords; ++i) {
+            int index = 0;
+            for (int j = 0; j < 11; ++j) {
+                index <<= 1;
+                if (concatBits[(i * 11) + j])
+                    index |= 0x1;
+            }
+            words.add(this.wordList.get(index));
+        }
+            
+        return words;        
+    }
+
+    /**
+     * Check to see if a mnemonic word list is valid.
+     */
+    public void check(List<String> words) throws MnemonicException {
+        toEntropy(words);
     }
 
     private static boolean[] bytesToBits(byte[] data) {
         boolean[] bits = new boolean[data.length * 8];
-        for (int ii = 0; ii < data.length; ++ii)
-            for (int jj = 0; jj < 8; ++jj)
-                bits[(ii * 8) + jj] = (data[ii] & (1 << (7 - jj))) != 0;
+        for (int i = 0; i < data.length; ++i)
+            for (int j = 0; j < 8; ++j)
+                bits[(i * 8) + j] = (data[i] & (1 << (7 - j))) != 0;
         return bits;
-    }
-
-    static private String joinStringList(List<String> list) {
-        StringBuilder sb = new StringBuilder();
-        boolean first = true;
-        for (String item : list)
-        {
-            if (first)
-                first = false;
-            else
-                sb.append(" ");
-            sb.append(item);
-        }
-        return sb.toString();
     }
 }

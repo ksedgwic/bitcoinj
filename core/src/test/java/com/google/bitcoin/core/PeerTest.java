@@ -78,7 +78,8 @@ public class PeerTest extends TestWithNetworkConnections {
 
         memoryPool = new MemoryPool();
         VersionMessage ver = new VersionMessage(unitTestParams, 100);
-        peer = new Peer(unitTestParams, ver, new InetSocketAddress("127.0.0.1", 4000), blockChain, memoryPool);
+        InetSocketAddress address = new InetSocketAddress("127.0.0.1", 4000);
+        peer = new Peer(unitTestParams, ver, new PeerAddress(address), blockChain, memoryPool);
         peer.addWallet(wallet);
     }
 
@@ -265,7 +266,8 @@ public class PeerTest extends TestWithNetworkConnections {
     public void invDownloadTxMultiPeer() throws Exception {
         // Check co-ordination of which peer to download via the memory pool.
         VersionMessage ver = new VersionMessage(unitTestParams, 100);
-        Peer peer2 = new Peer(unitTestParams, ver, new InetSocketAddress("127.0.0.1", 4242), blockChain, memoryPool);
+        InetSocketAddress address = new InetSocketAddress("127.0.0.1", 4242);
+        Peer peer2 = new Peer(unitTestParams, ver, new PeerAddress(address), blockChain, memoryPool);
         peer2.addWallet(wallet);
         VersionMessage peerVersion = new VersionMessage(unitTestParams, OTHER_PEER_CHAIN_HEIGHT);
         peerVersion.clientVersion = 70001;
@@ -276,7 +278,7 @@ public class PeerTest extends TestWithNetworkConnections {
 
         // Make a tx and advertise it to one of the peers.
         BigInteger value = Utils.toNanoCoins(1, 0);
-        Transaction tx = createFakeTx(unitTestParams, value, address);
+        Transaction tx = createFakeTx(unitTestParams, value, this.address);
         InventoryMessage inv = new InventoryMessage(unitTestParams);
         InventoryItem item = new InventoryItem(InventoryItem.Type.Transaction, tx.getHash());
         inv.addItem(item);
@@ -447,7 +449,7 @@ public class PeerTest extends TestWithNetworkConnections {
         Block b4 = makeSolvedTestBlock(b3);
 
         // Request headers until the last 2 blocks.
-        peer.setDownloadParameters((Utils.now().getTime() / 1000) - (600*2) + 1, false);
+        peer.setDownloadParameters((Utils.currentTimeMillis() / 1000) - (600*2) + 1, false);
         peer.startBlockChainDownload();
         GetHeadersMessage getheaders = (GetHeadersMessage) outbound(writeTarget);
         List<Sha256Hash> expectedLocator = new ArrayList<Sha256Hash>();
@@ -650,9 +652,8 @@ public class PeerTest extends TestWithNetworkConnections {
         connectWithVersion(useNotFound ? 70001 : 60001);
         // Test that if we receive a relevant transaction that has a lock time, it doesn't result in a notification
         // until we explicitly opt in to seeing those.
-        ECKey key = new ECKey();
         Wallet wallet = new Wallet(unitTestParams);
-        wallet.addKey(key);
+        ECKey key = wallet.newKey();
         peer.addWallet(wallet);
         final Transaction[] vtx = new Transaction[1];
         wallet.addEventListener(new AbstractWalletEventListener() {
@@ -723,9 +724,8 @@ public class PeerTest extends TestWithNetworkConnections {
     private void checkTimeLockedDependency(boolean shouldAccept, boolean useNotFound) throws Exception {
         // Initial setup.
         connectWithVersion(useNotFound ? 70001 : 60001);
-        ECKey key = new ECKey();
         Wallet wallet = new Wallet(unitTestParams);
-        wallet.addKey(key);
+        ECKey key = wallet.newKey();
         wallet.setAcceptRiskyTransactions(shouldAccept);
         peer.addWallet(wallet);
         final Transaction[] vtx = new Transaction[1];
@@ -813,27 +813,6 @@ public class PeerTest extends TestWithNetworkConnections {
     }
 
     @Test
-    public void disconnectOldVersions2() throws Exception {
-        // Set up the connection with an old version.
-        final SettableFuture<Void> connectedFuture = SettableFuture.create();
-        final SettableFuture<Void> disconnectedFuture = SettableFuture.create();
-        peer.addEventListener(new AbstractPeerEventListener() {
-            @Override
-            public void onPeerConnected(Peer peer, int peerCount) {
-                connectedFuture.set(null);
-            }
-
-            @Override
-            public void onPeerDisconnected(Peer peer, int peerCount) {
-                disconnectedFuture.set(null);
-            }
-        });
-        peer.setMinProtocolVersion(500);
-        connectWithVersion(542);
-        pingAndWait(writeTarget);
-    }
-
-    @Test
     public void exceptionListener() throws Exception {
         wallet.addEventListener(new AbstractWalletEventListener() {
             @Override
@@ -892,7 +871,7 @@ public class PeerTest extends TestWithNetworkConnections {
                 peerDisconnected.set(null);
             }
         });
-        final NetworkParameters params = TestNet3Params.testNet();
+        final NetworkParameters params = TestNet3Params.get();
         BitcoinSerializer serializer = new BitcoinSerializer(params);
         // Now write some bogus truncated message.
         ByteArrayOutputStream out = new ByteArrayOutputStream();

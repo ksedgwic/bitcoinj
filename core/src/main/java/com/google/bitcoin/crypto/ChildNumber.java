@@ -23,7 +23,9 @@ package com.google.bitcoin.crypto;
  */
 public class ChildNumber {
     public static final int PRIV_BIT = 0x80000000;
+
     public static final ChildNumber ZERO = new ChildNumber(0);
+    public static final ChildNumber ZERO_PRIV = new ChildNumber(0, true);
 
     /** Integer i as per BIP 32 spec, including the MSB denoting derivation type (0 = public, 1 = private) **/
     private final int i;
@@ -39,9 +41,13 @@ public class ChildNumber {
         this.i = i;
     }
 
+    /** Returns the uint32 encoded form of the path element, including the MSB bit. */
     public int getI() {
         return i;
     }
+
+    /** Returns the uint32 encoded form of the path element, including the MSB bit. */
+    public int i() { return i; }
 
     public boolean isPrivateDerivation() {
         return hasPrivateBit(i);
@@ -51,15 +57,13 @@ public class ChildNumber {
         return (a & PRIV_BIT) != 0;
     }
 
-    /**
-     * @return the child number without the private/public derivation bit set.
-     */
-    public int getChildNumber() {
+    /** Returns the child number without the private/public derivation bit set (i.e. index in that part of the tree). */
+    public int num() {
         return i & (~PRIV_BIT);
     }
 
     public String toString() {
-        return String.format("%d%s", getChildNumber(), isPrivateDerivation() ? "'" : "");
+        return String.format("%d%s", num(), isPrivateDerivation() ? "'" : "");
     }
 
     @Override

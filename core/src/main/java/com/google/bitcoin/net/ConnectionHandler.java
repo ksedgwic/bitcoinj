@@ -18,8 +18,10 @@ package com.google.bitcoin.net;
 
 import com.google.bitcoin.core.Message;
 import com.google.bitcoin.utils.Threading;
+import com.google.common.base.Throwables;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -53,7 +55,7 @@ class ConnectionHandler implements MessageWriteTarget {
     @GuardedBy("lock") private final ByteBuffer readBuff;
     @GuardedBy("lock") private final SocketChannel channel;
     @GuardedBy("lock") private final SelectionKey key;
-    @GuardedBy("lock") final StreamParser parser;
+    @GuardedBy("lock") StreamParser parser;
     @GuardedBy("lock") private boolean closeCalled = false;
 
     @GuardedBy("lock") private long bytesToWriteRemaining = 0;
@@ -67,15 +69,15 @@ class ConnectionHandler implements MessageWriteTarget {
             throw new IOException("Parser factory.getNewParser returned null");
     }
 
-    private ConnectionHandler(StreamParser parser, SelectionKey key) {
+    private ConnectionHandler(@Nullable StreamParser parser, SelectionKey key) {
         this.key = key;
         this.channel = checkNotNull(((SocketChannel)key.channel()));
-        this.parser = parser;
         if (parser == null) {
             readBuff = null;
             closeConnection();
             return;
         }
+        this.parser = parser;
         readBuff = ByteBuffer.allocateDirect(Math.min(Math.max(parser.getMaxMessageSize(), BUFFER_SIZE_LOWER_BOUND), BUFFER_SIZE_UPPER_BOUND));
         parser.setWriteTarget(this); // May callback into us (eg closeConnection() now)
         connectedHandlers = null;
@@ -211,7 +213,7 @@ class ConnectionHandler implements MessageWriteTarget {
                 // "flip" the buffer - setting the limit to the current position and setting position to 0
                 handler.readBuff.flip();
                 // Use parser.receiveBytes's return value as a check that it stopped reading at the right location
-                int bytesConsumed = handler.parser.receiveBytes(handler.readBuff);
+                int bytesConsumed = checkNotNull(handler.parser).receiveBytes(handler.readBuff);
                 checkState(handler.readBuff.position() == bytesConsumed);
                 // Now drop the bytes which were read by compacting readBuff (resetting limit and keeping relative
                 // position)
@@ -222,9 +224,8 @@ class ConnectionHandler implements MessageWriteTarget {
         } catch (Exception e) {
             // This can happen eg if the channel closes while the thread is about to get killed
             // (ClosedByInterruptException), or if handler.parser.receiveBytes throws something
-            log.error("Error handling SelectionKey: ", e);
-            if (handler != null)
-                handler.closeConnection();
+            log.error("Error handling SelectionKey: {}", Throwables.getRootCause(e).getMessage());
+            handler.closeConnection();
         }
     }
 }

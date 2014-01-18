@@ -18,51 +18,69 @@ package com.google.bitcoin.crypto;
 import com.google.bitcoin.core.Base58;
 import com.google.bitcoin.core.ECKey;
 import com.google.bitcoin.core.Utils;
-import com.google.common.base.Joiner;
+import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
+import org.spongycastle.crypto.params.KeyParameter;
 import org.spongycastle.math.ec.ECPoint;
 import org.spongycastle.util.encoders.Hex;
 
 import javax.annotation.Nullable;
-import java.io.Serializable;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.text.MessageFormat;
 import java.util.Arrays;
-import java.util.Collections;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
-
-// TODO: Merge this with a redesigned ECKey class.
+import static com.google.common.base.Preconditions.*;
 
 /**
  * A deterministic key is a node in a {@link DeterministicHierarchy}. As per
  * <a href="https://en.bitcoin.it/wiki/BIP_0032">the BIP 32 specification</a> it is a pair (key, chaincode). If you
- * know its path in the tree you can derive more keys from this.
+ * know its path in the tree and its chain code you can derive more keys from this. To obtain one of these, you can call
+ * {@link HDKeyDerivation#createMasterPrivateKey(byte[])}.
  */
-public class DeterministicKey implements Serializable {
+public class DeterministicKey extends ECKey {
     private static final long serialVersionUID = 1L;
-    private static final Joiner PATH_JOINER = Joiner.on("/");
 
     private final DeterministicKey parent;
-    private ECPoint publicAsPoint;
-    private final BigInteger privateAsFieldElement;
     private final ImmutableList<ChildNumber> childNumberPath;
 
     /** 32 bytes */
     private final byte[] chainCode;
 
-    DeterministicKey(ImmutableList<ChildNumber> childNumberPath, byte[] chainCode,
-                     @Nullable ECPoint publicAsPoint, @Nullable BigInteger privateKeyFieldElt,
-                     @Nullable DeterministicKey parent) {
+    /** Constructs a key from its components. This is not normally something you should use. */
+    public DeterministicKey(ImmutableList<ChildNumber> childNumberPath,
+                            byte[] chainCode,
+                            ECPoint publicAsPoint,
+                            @Nullable BigInteger priv,
+                            @Nullable DeterministicKey parent) {
+        super(priv, compressPoint(checkNotNull(publicAsPoint)));
         checkArgument(chainCode.length == 32);
         this.parent = parent;
-        this.childNumberPath = childNumberPath;
+        this.childNumberPath = checkNotNull(childNumberPath);
         this.chainCode = Arrays.copyOf(chainCode, chainCode.length);
-        this.publicAsPoint = publicAsPoint == null ? null : HDUtils.compressedCopy(publicAsPoint);
-        this.privateAsFieldElement = privateKeyFieldElt;
+    }
+
+    /** Constructs a key from its components. This is not normally something you should use. */
+    public DeterministicKey(ImmutableList<ChildNumber> childNumberPath,
+                            byte[] chainCode,
+                            BigInteger priv,
+                            @Nullable DeterministicKey parent) {
+        super(priv, compressPoint(ECKey.CURVE.getG().multiply(priv)));
+        checkArgument(chainCode.length == 32);
+        this.parent = parent;
+        this.childNumberPath = checkNotNull(childNumberPath);
+        this.chainCode = Arrays.copyOf(chainCode, chainCode.length);
+    }
+
+    /** Constructs a key from its components. This is not normally something you should use. */
+    public DeterministicKey(ImmutableList<ChildNumber> childNumberPath,
+                            byte[] chainCode,
+                            @Nullable DeterministicKey parent,
+                            ECPoint pub,
+                            EncryptedData priv,
+                            KeyCrypter crypter) {
+        this(childNumberPath, chainCode, pub, null, parent);
+        this.encryptedPrivateKey = checkNotNull(priv);
+        this.keyCrypter = checkNotNull(crypter);
     }
 
     /**
@@ -70,17 +88,22 @@ public class DeterministicKey implements Serializable {
      * A path can be written as 1/2/1 which means the first child of the root, the second child of that node, then
      * the first child of that node.
      */
-    public ImmutableList<ChildNumber> getChildNumberPath() {
+    public ImmutableList<ChildNumber> getPath() {
         return childNumberPath;
+    }
+
+    /**
+     * Returns the path of this key as a human readable string starting with M to indicate the master key.
+     */
+    public String getPathAsString() {
+        return HDUtils.formatPath(getPath());
     }
 
     private int getDepth() {
         return childNumberPath.size();
     }
 
-    /**
-     * Returns the last element of the path returned by {@link DeterministicKey#getChildNumberPath()}
-     */
+    /** Returns the last element of the path returned by {@link DeterministicKey#getPath()} */
     public ChildNumber getChildNumber() {
         return getDepth() == 0 ? ChildNumber.ZERO : childNumberPath.get(childNumberPath.size() - 1);
     }
@@ -93,31 +116,11 @@ public class DeterministicKey implements Serializable {
     }
 
     /**
-     * Returns the path of this key as a human readable string starting with M to indicate the master key.
-     */
-    public String getPath() {
-        return PATH_JOINER.join(Iterables.concat(Collections.singleton("M"), getChildNumberPath()));
-    }
-
-    /**
      * Returns RIPE-MD160(SHA256(pub key bytes)).
      */
     public byte[] getIdentifier() {
-        return Utils.sha256hash160(getPubKeyBytes());
+        return Utils.sha256hash160(getPubKey());
     }
-
-    ECPoint getPubPoint() {
-        if (publicAsPoint == null) {
-            checkNotNull(privateAsFieldElement);
-            publicAsPoint = HDUtils.getEcParams().getG().multiply(privateAsFieldElement);
-        }
-        return HDUtils.compressedCopy(publicAsPoint);
-    }
-
-    public byte[] getPubKeyBytes() {
-        return getPubPoint().getEncoded();
-    }
-
 
     /** Returns the first 32 bits of the result of {@link #getIdentifier()}. */
     public byte[] getFingerprint() {
@@ -126,21 +129,8 @@ public class DeterministicKey implements Serializable {
     }
 
     @Nullable
-    public BigInteger getPrivAsFieldElement() {
-        return privateAsFieldElement;
-    }
-
-    @Nullable
     public DeterministicKey getParent() {
         return parent;
-    }
-
-    /**
-     * Returns the private key bytes, if they were provided during construction.
-     */
-    @Nullable
-    public byte[] getPrivKeyBytes() {
-        return privateAsFieldElement == null ? null : privateAsFieldElement.toByteArray();
     }
 
     /**
@@ -157,17 +147,9 @@ public class DeterministicKey implements Serializable {
      * Returns the same key with the private part removed. May return the same instance.
      */
     public DeterministicKey getPubOnly() {
-        if (!hasPrivate()) return this;
+        if (isPubKeyOnly()) return this;
         final DeterministicKey parentPub = getParent() == null ? null : getParent().getPubOnly();
-        return new DeterministicKey(getChildNumberPath(), getChainCode(), getPubPoint(), null, parentPub);
-    }
-
-    public boolean hasPrivate() {
-        return privateAsFieldElement != null;
-    }
-
-    public ECKey toECKey() {
-        return new ECKey(getPrivKeyBytes(), getPubKeyBytes());
+        return new DeterministicKey(getPath(), getChainCode(), getPubKeyPoint(), null, parentPub);
     }
 
     public String serializePubB58() {
@@ -191,6 +173,81 @@ public class DeterministicKey implements Serializable {
         return checksummed;
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public DeterministicKey encrypt(KeyCrypter keyCrypter, KeyParameter aesKey) throws KeyCrypterException {
+        // Same as the parent code, except we construct a DeterministicKey instead of an ECKey.
+        checkNotNull(keyCrypter);
+        final byte[] privKeyBytes = getPrivKeyBytes();
+        checkState(privKeyBytes != null, "Private key is not available");
+        EncryptedData encryptedPrivateKey = keyCrypter.encrypt(privKeyBytes, aesKey);
+        return new DeterministicKey(childNumberPath, chainCode, parent, pub, encryptedPrivateKey, keyCrypter);
+    }
+
+    /**
+     * A determinstic key is considered to be encrypted if it has access to encrypted private key bytes, OR if its
+     * parent does. The reason is because the parent would be encrypted under the same key and this key knows how to
+     * rederive its own private key bytes from the parent, if needed.
+     */
+    @Override
+    public boolean isEncrypted() {
+        return priv == null && (super.isEncrypted() || (parent != null && parent.isEncrypted()));
+    }
+
+    /**
+     * Returns this keys {@link com.google.bitcoin.crypto.KeyCrypter} <b>or</b> the keycrypter of its parent key.
+     */
+    @Override @Nullable
+    public KeyCrypter getKeyCrypter() {
+        if (keyCrypter != null)
+            return keyCrypter;
+        else if (parent != null)
+            return parent.getKeyCrypter();
+        else
+            return null;
+    }
+
+    @Override
+    public DeterministicKey decrypt(KeyCrypter keyCrypter, KeyParameter aesKey) throws KeyCrypterException {
+        checkNotNull(keyCrypter);
+        // Check that the keyCrypter matches the one used to encrypt the keys, if set.
+        if (this.keyCrypter != null && !this.keyCrypter.equals(keyCrypter))
+            throw new KeyCrypterException("The keyCrypter being used to decrypt the key is different to the one that was used to encrypt it");
+        BigInteger privKey = findOrDerivePrivateKey(keyCrypter, aesKey);
+        DeterministicKey key = new DeterministicKey(childNumberPath, chainCode, privKey, parent);
+        if (!Arrays.equals(key.getPubKey(), getPubKey()))
+            throw new KeyCrypterException("Provided AES key is wrong");
+        return key;
+    }
+
+    // For when a key is encrypted, either decrypt our encrypted private key bytes, or work up the tree asking parents
+    // to decrypt and re-derive.
+    private BigInteger findOrDerivePrivateKey(KeyCrypter keyCrypter, KeyParameter aesKey) {
+        if (encryptedPrivateKey != null)
+            return new BigInteger(1, keyCrypter.decrypt(encryptedPrivateKey, aesKey));
+        // Otherwise we don't have it, but maybe we can figure it out from our parents. Walk up the tree looking for
+        // the first key that has some encrypted private key data.
+        DeterministicKey cursor = parent;
+        while (cursor != null) {
+            if (cursor.encryptedPrivateKey != null) break;
+            cursor = cursor.parent;
+        }
+        if (cursor == null)
+            throw new KeyCrypterException("Neither this key nor its parents have an encrypted private key");
+        byte[] parentalPrivateKeyBytes = keyCrypter.decrypt(cursor.encryptedPrivateKey, aesKey);
+        DeterministicKey downCursor = new DeterministicKey(cursor.childNumberPath, cursor.chainCode,
+                cursor.pub, new BigInteger(1, parentalPrivateKeyBytes), cursor.parent);
+        // Now we have to rederive the keys along the path back to ourselves. That path can be found by just truncating
+        // our path with the length of the parents path.
+        ImmutableList<ChildNumber> path = childNumberPath.subList(cursor.getDepth(), childNumberPath.size());
+        for (ChildNumber num : path) {
+            downCursor = HDKeyDerivation.deriveChildKey(downCursor, num);
+        }
+        // downCursor is now the same key as us, but with private key bytes.
+        checkState(downCursor.pub.equals(pub));
+        return checkNotNull(downCursor.priv);
+    }
+
     public byte[] serializePublic() {
         return serialize(true);
     }
@@ -208,16 +265,46 @@ public class DeterministicKey implements Serializable {
         } else {
             ser.put(parent.getFingerprint());
         }
-        ser.putInt(getChildNumber().getI());
+        ser.putInt(getChildNumber().i());
         ser.put(getChainCode());
-        ser.put(pub ? getPubKeyBytes() : getPrivKeyBytes33());
-        assert ser.position() == 78;
-
+        ser.put(pub ? getPubKey() : getPrivKeyBytes33());
+        checkState(ser.position() == 78);
         return ser.array();
+    }
+
+    /**
+     * Verifies equality of all fields but NOT the parent pointer (thus the same key derived in two separate heirarchy
+     * objects will equal each other.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        if (!super.equals(o)) return false;
+
+        DeterministicKey key = (DeterministicKey) o;
+
+        if (!Arrays.equals(chainCode, key.chainCode)) return false;
+        if (!childNumberPath.equals(key.childNumberPath)) return false;
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + (parent != null ? parent.hashCode() : 0);
+        result = 31 * result + childNumberPath.hashCode();
+        result = 31 * result + Arrays.hashCode(chainCode);
+        return result;
     }
 
     @Override
     public String toString() {
-        return MessageFormat.format("ExtendedHierarchicKey[pub: {0}]", new String(Hex.encode(getPubKeyBytes())));
+        return Objects.toStringHelper(this)
+                .add("pub", new String(Hex.encode(getPubKey())))
+                .add("chaincode", new String(Hex.encode(getChainCode())))
+                .add("path", getPathAsString())
+                .toString();
     }
 }

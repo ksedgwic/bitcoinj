@@ -69,9 +69,8 @@ public class PaymentChannelStateTest extends TestWithWallet {
         }));
         sendMoneyToWallet(Utils.COIN, AbstractBlockChain.NewBlockType.BEST_CHAIN);
         chain = new BlockChain(params, wallet, blockStore); // Recreate chain as sendMoneyToWallet will confuse it
-        serverKey = new ECKey();
         serverWallet = new Wallet(params);
-        serverWallet.addKey(serverKey);
+        serverKey = serverWallet.newKey();
         chain.addWallet(serverWallet);
         halfCoin = Utils.toNanoCoins(0, 50);
 
@@ -115,12 +114,12 @@ public class PaymentChannelStateTest extends TestWithWallet {
         // Check it all works when things are normal (no attacks, no problems).
 
         Utils.rollMockClock(0); // Use mock clock
-        final long EXPIRE_TIME = Utils.now().getTime()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
 
         serverState = new PaymentChannelServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(PaymentChannelServerState.State.WAITING_FOR_REFUND_TRANSACTION, serverState.getState());
 
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()), halfCoin, EXPIRE_TIME);
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()), halfCoin, EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         clientState.initiate();
         assertEquals(PaymentChannelClientState.State.INITIATED, clientState.getState());
@@ -229,12 +228,12 @@ public class PaymentChannelStateTest extends TestWithWallet {
         wallet.addOrUpdateExtension(stateStorage);
 
         Utils.rollMockClock(0); // Use mock clock
-        final long EXPIRE_TIME = Utils.now().getTime()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
 
         serverState = new PaymentChannelServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(PaymentChannelServerState.State.WAITING_FOR_REFUND_TRANSACTION, serverState.getState());
 
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()),
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()),
                                                     Utils.CENT.divide(BigInteger.valueOf(2)), EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         assertEquals(Utils.CENT.divide(BigInteger.valueOf(2)), clientState.getTotalValue());
@@ -331,19 +330,12 @@ public class PaymentChannelStateTest extends TestWithWallet {
         // We'll broadcast only one tx: multisig contract
 
         Utils.rollMockClock(0); // Use mock clock
-        final long EXPIRE_TIME = Utils.now().getTime()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
 
         serverState = new PaymentChannelServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(PaymentChannelServerState.State.WAITING_FOR_REFUND_TRANSACTION, serverState.getState());
 
-        try {
-            clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null,
-                    Arrays.copyOf(serverKey.getPubKey(), serverKey.getPubKey().length + 1)), halfCoin, EXPIRE_TIME);
-        } catch (VerificationException e) {
-            assertTrue(e.getMessage().contains("not canonical"));
-        }
-
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()), halfCoin, EXPIRE_TIME);
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()), halfCoin, EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         clientState.initiate();
         assertEquals(PaymentChannelClientState.State.INITIATED, clientState.getState());
@@ -542,20 +534,20 @@ public class PaymentChannelStateTest extends TestWithWallet {
         assertEquals(Utils.CENT, wallet.getBalance());
 
         Utils.rollMockClock(0); // Use mock clock
-        final long EXPIRE_TIME = Utils.now().getTime()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
 
         serverState = new PaymentChannelServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(PaymentChannelServerState.State.WAITING_FOR_REFUND_TRANSACTION, serverState.getState());
 
         // Clearly ONE is far too small to be useful
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()), BigInteger.ONE, EXPIRE_TIME);
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()), BigInteger.ONE, EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         try {
             clientState.initiate();
             fail();
         } catch (ValueOutOfRangeException e) {}
 
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()),
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()),
                                                     Transaction.MIN_NONDUST_OUTPUT.subtract(BigInteger.ONE).add(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE),
                 EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
@@ -565,7 +557,7 @@ public class PaymentChannelStateTest extends TestWithWallet {
         } catch (ValueOutOfRangeException e) {}
 
         // Verify that MIN_NONDUST_OUTPUT + MIN_TX_FEE is accepted
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()),
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()),
                 Transaction.MIN_NONDUST_OUTPUT.add(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE), EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         // We'll have to pay REFERENCE_DEFAULT_MIN_TX_FEE twice (multisig+refund), and we'll end up getting back nearly nothing...
@@ -574,7 +566,7 @@ public class PaymentChannelStateTest extends TestWithWallet {
         assertEquals(PaymentChannelClientState.State.INITIATED, clientState.getState());
 
         // Now actually use a more useful CENT
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()), Utils.CENT, EXPIRE_TIME);
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()), Utils.CENT, EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         clientState.initiate();
         assertEquals(clientState.getRefundTxFees(), BigInteger.ZERO);
@@ -645,12 +637,12 @@ public class PaymentChannelStateTest extends TestWithWallet {
         // Test that the server properly adds the necessary fee at the end (or just drops the payment if its not worth it)
 
         Utils.rollMockClock(0); // Use mock clock
-        final long EXPIRE_TIME = Utils.now().getTime()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
 
         serverState = new PaymentChannelServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(PaymentChannelServerState.State.WAITING_FOR_REFUND_TRANSACTION, serverState.getState());
 
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()), Utils.CENT, EXPIRE_TIME) {
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()), Utils.CENT, EXPIRE_TIME) {
             @Override
             protected void editContractSendRequest(Wallet.SendRequest req) {
                 req.coinSelector = wallet.getCoinSelector();
@@ -731,12 +723,12 @@ public class PaymentChannelStateTest extends TestWithWallet {
 
         // Start with a copy of basic()....
         Utils.rollMockClock(0); // Use mock clock
-        final long EXPIRE_TIME = Utils.now().getTime()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
 
         serverState = new PaymentChannelServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(PaymentChannelServerState.State.WAITING_FOR_REFUND_TRANSACTION, serverState.getState());
 
-        clientState = new PaymentChannelClientState(wallet, myKey, new ECKey(null, serverKey.getPubKey()), halfCoin, EXPIRE_TIME);
+        clientState = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(serverKey.getPubKey()), halfCoin, EXPIRE_TIME);
         assertEquals(PaymentChannelClientState.State.NEW, clientState.getState());
         clientState.initiate();
         assertEquals(PaymentChannelClientState.State.INITIATED, clientState.getState());

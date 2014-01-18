@@ -94,7 +94,7 @@ public class StoredPaymentChannelClientStates implements WalletExtension {
         lock.lock();
         try {
             final Set<StoredClientChannel> setChannels = mapChannels.get(id);
-            final long nowSeconds = Utils.now().getTime() / 1000;
+            final long nowSeconds = Utils.currentTimeMillis() / 1000;
             int earliestTime = Integer.MAX_VALUE;
             for (StoredClientChannel channel : setChannels) {
                 synchronized (channel) {
@@ -141,6 +141,7 @@ public class StoredPaymentChannelClientStates implements WalletExtension {
     /**
      * Finds a channel with the given id and contract hash and returns it, or returns null.
      */
+    @Nullable
     StoredClientChannel getChannel(Sha256Hash id, Sha256Hash contractHash) {
         lock.lock();
         try {
@@ -176,7 +177,7 @@ public class StoredPaymentChannelClientStates implements WalletExtension {
                     announcePeerGroup.broadcastTransaction(channel.refund);
                 }
                 // Add the difference between real time and Utils.now() so that test-cases can use a mock clock.
-            }, new Date(channel.expiryTimeSeconds() * 1000 + (System.currentTimeMillis() - Utils.now().getTime())));
+            }, new Date(channel.expiryTimeSeconds() * 1000 + (System.currentTimeMillis() - Utils.currentTimeMillis())));
         } finally {
             lock.unlock();
         }
@@ -254,7 +255,7 @@ public class StoredPaymentChannelClientStates implements WalletExtension {
                 StoredClientChannel channel = new StoredClientChannel(new Sha256Hash(storedState.getId().toByteArray()),
                         new Transaction(params, storedState.getContractTransaction().toByteArray()),
                         refundTransaction,
-                        new ECKey(new BigInteger(1, storedState.getMyKey().toByteArray()), null, true),
+                        ECKey.fromPrivate(storedState.getMyKey().toByteArray()),
                         BigInteger.valueOf(storedState.getValueToMe()),
                         BigInteger.valueOf(storedState.getRefundFees()), false);
                 if (storedState.hasCloseTransactionHash())

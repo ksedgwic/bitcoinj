@@ -119,7 +119,7 @@ public class PaymentChannelServerState {
             this.broadcaster = checkNotNull(broadcaster);
             this.multisigContract = checkNotNull(storedServerChannel.contract);
             this.multisigScript = multisigContract.getOutput(0).getScriptPubKey();
-            this.clientKey = new ECKey(null, multisigScript.getChunks().get(1).data);
+            this.clientKey = ECKey.fromPublicOnly(multisigScript.getChunks().get(1).data);
             this.clientOutput = checkNotNull(storedServerChannel.clientOutput);
             this.refundTransactionUnlockTimeSecs = storedServerChannel.refundTransactionUnlockTimeSecs;
             this.serverKey = checkNotNull(storedServerChannel.myKey);
@@ -192,7 +192,7 @@ public class PaymentChannelServerState {
 
         // Sign the refund tx with the scriptPubKey and return the signature. We don't have the spending transaction
         // so do the steps individually.
-        clientKey = new ECKey(null, clientMultiSigPubKey);
+        clientKey = ECKey.fromPublicOnly(clientMultiSigPubKey);
         Script multisigPubKey = ScriptBuilder.createMultiSigOutputScript(2, ImmutableList.of(clientKey, serverKey));
         // We are really only signing the fact that the transaction has a proper lock time and don't care about anything
         // else, so we sign SIGHASH_NONE and SIGHASH_ANYONECANPAY.
@@ -303,7 +303,7 @@ public class PaymentChannelServerState {
         // was not connected to the peergroup when the contract was broadcast (which may cause issues down the road, and
         // disables our double-spend check next)
         Transaction walletContract = wallet.getTransaction(multisigContract.getHash());
-        checkState(walletContract != null, "Wallet did not contain multisig contract {} after state was marked READY", multisigContract.getHash());
+        checkNotNull(walletContract, "Wallet did not contain multisig contract {} after state was marked READY", multisigContract.getHash());
 
         // Note that we check for DEAD state here, but this test is essentially useless in production because we will
         // miss most double-spends due to bloom filtering right now anyway. This will eventually fixed by network-wide

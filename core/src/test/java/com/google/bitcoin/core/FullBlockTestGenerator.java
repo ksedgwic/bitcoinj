@@ -882,7 +882,7 @@ public class FullBlockTestGenerator {
         
         // A valid block created exactly like b44 to make sure the creation itself works
         Block b44 = new Block(params);
-        byte[] outScriptBytes = ScriptBuilder.createOutputScript(new ECKey(null, coinbaseOutKeyPubKey)).getProgram();
+        byte[] outScriptBytes = ScriptBuilder.createOutputScript(ECKey.fromPublicOnly(coinbaseOutKeyPubKey)).getProgram();
         {
             b44.setDifficultyTarget(b43.getDifficultyTarget());
             b44.addCoinbaseTransaction(coinbaseOutKeyPubKey, BigInteger.ZERO);
@@ -964,7 +964,7 @@ public class FullBlockTestGenerator {
         
         // Block with timestamp > 2h in the future
         Block b48 = createNextBlock(b44, chainHeadHeight + 16, out15, null);
-        b48.setTime(Utils.now().getTime() / 1000 + 60*60*3);
+        b48.setTime(Utils.currentTimeMillis() / 1000 + 60*60*3);
         b48.solve();
         blocks.add(new BlockAndValidity(blockToHeightMap, b48, false, true, b44.getHash(), chainHeadHeight + 15, "b48"));
         
@@ -1632,7 +1632,7 @@ public class FullBlockTestGenerator {
             // Entirely invalid scriptPubKey to ensure we aren't pre-verifying too much
             t.addOutput(new TransactionOutput(params, t, BigInteger.valueOf(0), new byte[] {OP_PUSHDATA1 - 1 }));
             t.addOutput(new TransactionOutput(params, t, BigInteger.valueOf(1),
-                    ScriptBuilder.createOutputScript(new ECKey(null, coinbaseOutKeyPubKey)).getProgram()));
+                    ScriptBuilder.createOutputScript(ECKey.fromPublicOnly(coinbaseOutKeyPubKey)).getProgram()));
             // Spendable output
             t.addOutput(new TransactionOutput(params, t, BigInteger.ZERO, new byte[] {OP_1}));
             addOnlyInputToTransaction(t, prevOut);

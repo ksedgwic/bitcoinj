@@ -134,7 +134,7 @@ public class PaymentChannelClient implements IPaymentChannelClient {
 
         checkState(initiate.getExpireTimeSecs() > 0 && initiate.getMinAcceptedChannelSize() >= 0);
 
-        final long MAX_EXPIRY_TIME = Utils.now().getTime() / 1000 + MAX_TIME_WINDOW;
+        final long MAX_EXPIRY_TIME = Utils.currentTimeMillis() / 1000 + MAX_TIME_WINDOW;
         if (initiate.getExpireTimeSecs() > MAX_EXPIRY_TIME) {
             log.error("Server expiry time was out of our allowed bounds: {} vs {}", initiate.getExpireTimeSecs(),
                     MAX_EXPIRY_TIME);
@@ -160,8 +160,10 @@ public class PaymentChannelClient implements IPaymentChannelClient {
             return CloseReason.SERVER_REQUESTED_TOO_MUCH_VALUE;
         }
 
-        state = new PaymentChannelClientState(wallet, myKey,
-                new ECKey(null, initiate.getMultisigKey().toByteArray()),
+        final byte[] pubKeyBytes = initiate.getMultisigKey().toByteArray();
+        if (!ECKey.isPubKeyCanonical(pubKeyBytes))
+            throw new VerificationException("Server gave us a non-canonical public key, protocol error.");
+        state = new PaymentChannelClientState(wallet, myKey, ECKey.fromPublicOnly(pubKeyBytes),
                 contractValue, initiate.getExpireTimeSecs());
         try {
             state.initiate();

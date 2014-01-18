@@ -217,9 +217,9 @@ public class PaymentChannelServer {
                 minAcceptedChannelSize.longValue());
 
         myKey = new ECKey();
-        wallet.addKey(myKey);
+        wallet.newKey();
 
-        expireTime = Utils.now().getTime() / 1000 + timeWindow;
+        expireTime = Utils.currentTimeMillis() / 1000 + timeWindow;
         step = InitStep.WAITING_ON_UNSIGNED_REFUND;
 
         Protos.Initiate.Builder initiateBuilder = Protos.Initiate.newBuilder()

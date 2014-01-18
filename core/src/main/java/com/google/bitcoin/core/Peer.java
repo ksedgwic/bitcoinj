@@ -155,7 +155,7 @@ public class Peer extends PeerSocketHandler {
      * <p>The remoteAddress provided should match the remote address of the peer which is being connected to, and is
      * used to keep track of which peers relayed transactions and offer more descriptive logging.</p>
      */
-    public Peer(NetworkParameters params, VersionMessage ver, @Nullable AbstractBlockChain chain, InetSocketAddress remoteAddress) {
+    public Peer(NetworkParameters params, VersionMessage ver, @Nullable AbstractBlockChain chain, PeerAddress remoteAddress) {
         this(params, ver, remoteAddress, chain, null);
     }
 
@@ -173,7 +173,7 @@ public class Peer extends PeerSocketHandler {
      * <p>The remoteAddress provided should match the remote address of the peer which is being connected to, and is
      * used to keep track of which peers relayed transactions and offer more descriptive logging.</p>
      */
-    public Peer(NetworkParameters params, VersionMessage ver, InetSocketAddress remoteAddress,
+    public Peer(NetworkParameters params, VersionMessage ver, PeerAddress remoteAddress,
 				@Nullable AbstractBlockChain chain, @Nullable MemoryPool mempool) {
         super(params, remoteAddress);
         this.params = Preconditions.checkNotNull(params);
@@ -203,8 +203,8 @@ public class Peer extends PeerSocketHandler {
      * <p>The remoteAddress provided should match the remote address of the peer which is being connected to, and is
      * used to keep track of which peers relayed transactions and offer more descriptive logging.</p>
      */
-    public Peer(NetworkParameters params, AbstractBlockChain blockChain, InetSocketAddress remoteAddress, String thisSoftwareName, String thisSoftwareVersion) {
-        this(params, new VersionMessage(params, blockChain.getBestChainHeight(), true), blockChain, remoteAddress);
+    public Peer(NetworkParameters params, AbstractBlockChain blockChain, PeerAddress peerAddress, String thisSoftwareName, String thisSoftwareVersion) {
+        this(params, new VersionMessage(params, blockChain.getBestChainHeight(), true), blockChain, peerAddress);
         this.versionMessage.appendToSubVer(thisSoftwareName, thisSoftwareVersion, null);
     }
 
@@ -368,14 +368,14 @@ public class Peer extends PeerSocketHandler {
         // Switch to the new protocol version.
         int peerVersion = vPeerVersionMessage.clientVersion;
         PeerAddress peerAddress = getAddress();
-        log.info("Connected to {}: version={}, subVer='{}', services=0x{}, time={}, blocks={}", new Object[] {
+        long peerTime = vPeerVersionMessage.time * 1000;
+        log.info("Connected to {}: version={}, subVer='{}', services=0x{}, time={}, blocks={}",
                 peerAddress == null ? "Peer" : peerAddress.getAddr().getHostAddress(),
                 peerVersion,
-				vPeerVersionMessage.subVer,
-				vPeerVersionMessage.localServices,
-                new Date(vPeerVersionMessage.time * 1000),
-				vPeerVersionMessage.bestHeight
-        });
+                vPeerVersionMessage.subVer,
+                vPeerVersionMessage.localServices,
+                String.format("%tF %tT", peerTime, peerTime),
+                vPeerVersionMessage.bestHeight);
         // Now it's our turn ...
         // Send an ACK message stating we accept the peers protocol version.
         sendMessage(new VersionAck());
@@ -1268,12 +1268,12 @@ public class Peer extends PeerSocketHandler {
         public PendingPing(long nonce) {
             future = SettableFuture.create();
             this.nonce = nonce;
-            startTimeMsec = Utils.now().getTime();
+            startTimeMsec = Utils.currentTimeMillis();
         }
 
         public void complete() {
             checkNotNull(future, "Already completed");
-            Long elapsed = Utils.now().getTime() - startTimeMsec;
+            Long elapsed = Utils.currentTimeMillis() - startTimeMsec;
             Peer.this.addPingTimeData(elapsed);
             log.debug("{}: ping time is {} msec", Peer.this.toString(), elapsed);
             future.set(elapsed);

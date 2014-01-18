@@ -72,7 +72,7 @@ public class Script {
     // Used from ScriptBuilder.
     Script(List<ScriptChunk> chunks) {
         this.chunks = Collections.unmodifiableList(new ArrayList<ScriptChunk>(chunks));
-        creationTimeSeconds = Utils.now().getTime() / 1000;
+        creationTimeSeconds = Utils.currentTimeMillis() / 1000;
     }
 
     /**
@@ -83,7 +83,7 @@ public class Script {
     public Script(byte[] programBytes) throws ScriptException {
         program = programBytes;
         parse(programBytes);
-        creationTimeSeconds = Utils.now().getTime() / 1000;
+        creationTimeSeconds = Utils.currentTimeMillis() / 1000;
     }
 
     public Script(byte[] programBytes, long creationTimeSeconds) throws ScriptException {
@@ -101,7 +101,7 @@ public class Script {
     }
 
     /**
-     * Returns the program opcodes as a string, for example "[1234] DUP HAHS160"
+     * Returns the program opcodes as a string, for example "[1234] DUP HASH160"
      */
     public String toString() {
         StringBuilder buf = new StringBuilder();
@@ -116,12 +116,7 @@ public class Script {
                 buf.append("] ");
             }
         }
-
-        if (creationTimeSeconds != 0) {
-            buf.append(" timestamp:").append(creationTimeSeconds);
-        }
-
-        return buf.toString();
+        return buf.toString().trim();
     }
 
     /** Returns the serialized program as a newly created byte array. */

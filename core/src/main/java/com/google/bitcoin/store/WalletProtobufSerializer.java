@@ -18,10 +18,11 @@ package com.google.bitcoin.store;
 
 import com.google.bitcoin.core.*;
 import com.google.bitcoin.core.TransactionConfidence.ConfidenceType;
-import com.google.bitcoin.crypto.EncryptedPrivateKey;
+import com.google.bitcoin.crypto.EncryptedData;
 import com.google.bitcoin.crypto.KeyCrypter;
 import com.google.bitcoin.crypto.KeyCrypterScrypt;
 import com.google.bitcoin.script.Script;
+import com.google.bitcoin.wallet.WalletTransaction;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.TextFormat;
@@ -50,7 +51,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * a data interchange format developed by Google with an efficient binary representation, a type safe specification
  * language and compilers that generate code to work with those data structures for many languages. Protocol buffers
  * can have their format evolved over time: conceptually they represent data using (tag, length, value) tuples. The
- * format is defined by the <tt>bitcoin.proto</tt> file in the bitcoinj source distribution.<p>
+ * format is defined by the <tt>wallet.proto</tt> file in the bitcoinj source distribution.<p>
  *
  * This class is used through its static methods. The most common operations are writeWallet and readWallet, which do
  * the obvious operations on Output/InputStreams. You can use a {@link java.io.ByteArrayInputStream} and equivalent
@@ -127,14 +128,14 @@ public class WalletProtobufSerializer {
                                                          // .setLabel() TODO
                                                             .setType(Protos.Key.Type.ORIGINAL);
             if (key.getPrivKeyBytes() != null)
-                keyBuilder.setPrivateKey(ByteString.copyFrom(key.getPrivKeyBytes()));
+                keyBuilder.setSecretBytes(ByteString.copyFrom(key.getPrivKeyBytes()));
 
-            EncryptedPrivateKey encryptedPrivateKey = key.getEncryptedPrivateKey();
+            EncryptedData encryptedPrivateKey = key.getEncryptedPrivateKey();
             if (encryptedPrivateKey != null) {
                 // Key is encrypted.
-                Protos.EncryptedPrivateKey.Builder encryptedKeyBuilder = Protos.EncryptedPrivateKey.newBuilder()
-                    .setEncryptedPrivateKey(ByteString.copyFrom(encryptedPrivateKey.getEncryptedBytes()))
-                    .setInitialisationVector(ByteString.copyFrom(encryptedPrivateKey.getInitialisationVector()));
+                Protos.EncryptedData.Builder encryptedKeyBuilder = Protos.EncryptedData.newBuilder()
+                    .setEncryptedPrivateKey(ByteString.copyFrom(encryptedPrivateKey.encryptedBytes))
+                    .setInitialisationVector(ByteString.copyFrom(encryptedPrivateKey.initialisationVector));
 
                 if (key.getKeyCrypter() == null) {
                     throw new IllegalStateException("The encrypted key " + key.toString() + " has no KeyCrypter.");
@@ -147,7 +148,7 @@ public class WalletProtobufSerializer {
                                 ". This WalletProtobufSerialiser does not understand that type of encryption.");
                     }
                 }
-                keyBuilder.setEncryptedPrivateKey(encryptedKeyBuilder);
+                keyBuilder.setEncryptedData(encryptedKeyBuilder);
             }
 
             // We serialize the public key even if the private key is present for speed reasons: we don't want to do
@@ -220,7 +221,7 @@ public class WalletProtobufSerializer {
         Transaction tx = wtx.getTransaction();
         Protos.Transaction.Builder txBuilder = Protos.Transaction.newBuilder();
         
-        txBuilder.setPool(Protos.Transaction.Pool.valueOf(wtx.getPool().getValue()))
+        txBuilder.setPool(getProtoPool(wtx))
                  .setHash(hashToByteString(tx.getHash()))
                  .setVersion((int) tx.getVersion());
 
@@ -287,6 +288,17 @@ public class WalletProtobufSerializer {
         return txBuilder.build();
     }
 
+    private static Protos.Transaction.Pool getProtoPool(WalletTransaction wtx) {
+        switch (wtx.getPool()) {
+            case UNSPENT: return Protos.Transaction.Pool.UNSPENT;
+            case SPENT: return Protos.Transaction.Pool.SPENT;
+            case DEAD: return Protos.Transaction.Pool.DEAD;
+            case PENDING: return Protos.Transaction.Pool.PENDING;
+            default:
+                throw new RuntimeException("Unreachable");
+        }
+    }
+
     private static void writeConfidence(Protos.Transaction.Builder txBuilder,
                                         TransactionConfidence confidence,
                                         Protos.TransactionConfidence.Builder confidenceBuilder) {
@@ -350,19 +362,18 @@ public class WalletProtobufSerializer {
      * @throws UnreadableWalletException thrown in various error conditions (see description).
      */
     public Wallet readWallet(InputStream input) throws UnreadableWalletException {
-        Protos.Wallet walletProto = null;
         try {
-            walletProto = parseToProto(input);
+            Protos.Wallet walletProto = parseToProto(input);
+            final String paramsID = walletProto.getNetworkIdentifier();
+            NetworkParameters params = NetworkParameters.fromID(paramsID);
+            if (params == null)
+                throw new UnreadableWalletException("Unknown network parameters ID " + paramsID);
+            Wallet wallet = new Wallet(params);
+            readWallet(walletProto, wallet);
+            return wallet;
         } catch (IOException e) {
-            throw new UnreadableWalletException("Could not load wallet file", e);
+            throw new UnreadableWalletException("Could not parse input stream to protobuf", e);
         }
-
-        // System.out.println(TextFormat.printToString(walletProto));
-
-        NetworkParameters params = NetworkParameters.fromID(walletProto.getNetworkIdentifier());
-        Wallet wallet = new Wallet(params);
-        readWallet(walletProto, wallet);
-        return wallet;
     }
 
     /**
@@ -393,27 +404,32 @@ public class WalletProtobufSerializer {
                 throw new UnreadableWalletException("Unknown key type in wallet, type = " + keyProto.getType());
             }
 
-            byte[] privKey = keyProto.hasPrivateKey() ? keyProto.getPrivateKey().toByteArray() : null;
-            EncryptedPrivateKey encryptedPrivateKey = null;
-            if (keyProto.hasEncryptedPrivateKey()) {
-                Protos.EncryptedPrivateKey encryptedPrivateKeyProto = keyProto.getEncryptedPrivateKey();
-                encryptedPrivateKey = new EncryptedPrivateKey(encryptedPrivateKeyProto.getInitialisationVector().toByteArray(),
-                        encryptedPrivateKeyProto.getEncryptedPrivateKey().toByteArray());
+            byte[] privKey = keyProto.hasSecretBytes() ? keyProto.getSecretBytes().toByteArray() : null;
+            EncryptedData encryptedPrivateKey = null;
+            if (keyProto.hasEncryptedData()) {
+                Protos.EncryptedData proto = keyProto.getEncryptedData();
+                encryptedPrivateKey = new EncryptedData(proto.getInitialisationVector().toByteArray(),
+                        proto.getEncryptedPrivateKey().toByteArray());
             }
 
-            byte[] pubKey = keyProto.hasPublicKey() ? keyProto.getPublicKey().toByteArray() : null;
+            byte[] pubKey = keyProto.getPublicKey().toByteArray();
 
             ECKey ecKey;
             final KeyCrypter keyCrypter = wallet.getKeyCrypter();
             if (keyCrypter != null && keyCrypter.getUnderstoodEncryptionType() != EncryptionType.UNENCRYPTED) {
                 // If the key is encrypted construct an ECKey using the encrypted private key bytes.
-                ecKey = new ECKey(encryptedPrivateKey, pubKey, keyCrypter);
+                checkNotNull(encryptedPrivateKey);
+                ecKey = ECKey.fromEncrypted(encryptedPrivateKey, keyCrypter, pubKey);
             } else {
                 // Construct an unencrypted private key.
-                ecKey = new ECKey(privKey, pubKey);
+                checkNotNull(pubKey);
+                if (privKey != null)
+                    ecKey = ECKey.fromPrivateAndPrecalculatedPublic(privKey, pubKey);
+                else
+                    ecKey = ECKey.fromPublicOnly(pubKey);
             }
             ecKey.setCreationTimeSeconds((keyProto.getCreationTimestamp() + 500) / 1000);
-            wallet.addKey(ecKey);
+            wallet.importKey(ecKey);
         }
 
         List<Script> scripts = Lists.newArrayList();
@@ -565,13 +581,22 @@ public class WalletProtobufSerializer {
 
     private WalletTransaction connectTransactionOutputs(org.bitcoinj.wallet.Protos.Transaction txProto) throws UnreadableWalletException {
         Transaction tx = txMap.get(txProto.getHash());
-        WalletTransaction.Pool pool = WalletTransaction.Pool.valueOf(txProto.getPool().getNumber());
-        if (pool == WalletTransaction.Pool.INACTIVE || pool == WalletTransaction.Pool.PENDING_INACTIVE) {
+        final WalletTransaction.Pool pool;
+        switch (txProto.getPool()) {
+            case DEAD: pool = WalletTransaction.Pool.DEAD; break;
+            case PENDING: pool = WalletTransaction.Pool.PENDING; break;
+            case SPENT: pool = WalletTransaction.Pool.SPENT; break;
+            case UNSPENT: pool = WalletTransaction.Pool.UNSPENT; break;
             // Upgrade old wallets: inactive pool has been merged with the pending pool.
             // Remove this some time after 0.9 is old and everyone has upgraded.
             // There should not be any spent outputs in this tx as old wallets would not allow them to be spent
             // in this state.
-            pool = WalletTransaction.Pool.PENDING;
+            case INACTIVE:
+            case PENDING_INACTIVE:
+                pool = WalletTransaction.Pool.PENDING;
+                break;
+            default:
+                throw new UnreadableWalletException("Unknown transaction pool: " + txProto.getPool());
         }
         for (int i = 0 ; i < tx.getOutputs().size() ; i++) {
             TransactionOutput output = tx.getOutputs().get(i);

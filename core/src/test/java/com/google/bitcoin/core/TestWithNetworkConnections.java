@@ -24,6 +24,7 @@ import com.google.bitcoin.utils.BriefLogFormatter;
 import com.google.bitcoin.utils.Threading;
 import com.google.common.util.concurrent.SettableFuture;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -40,6 +41,7 @@ import static org.junit.Assert.assertTrue;
  * Utility class that makes it easy to work with mock NetworkConnections.
  */
 public class TestWithNetworkConnections {
+    public static final int PEER_SERVERS = 5;
     protected NetworkParameters unitTestParams;
     protected BlockStore blockStore;
     protected BlockChain blockChain;
@@ -48,7 +50,7 @@ public class TestWithNetworkConnections {
     protected Address address;
     protected SocketAddress socketAddress;
 
-    private NioServer peerServer;
+    private NioServer peerServers[] = new NioServer[PEER_SERVERS];
     private final ClientConnectionManager channels;
     protected final BlockingQueue<InboundMessageQueuer> newPeerWriteTargetQueue = new LinkedBlockingQueue<InboundMessageQueuer>();
 
@@ -80,34 +82,55 @@ public class TestWithNetworkConnections {
         Wallet.SendRequest.DEFAULT_FEE_PER_KB = BigInteger.ZERO;
         this.blockStore = blockStore;
         wallet = new Wallet(unitTestParams);
-        key = new ECKey();
+        key = wallet.newKey();
         address = key.toAddress(unitTestParams);
-        wallet.addKey(key);
         blockChain = new BlockChain(unitTestParams, wallet, blockStore);
 
-        peerServer = new NioServer(new StreamParserFactory() {
-            @Nullable
-            @Override
-            public StreamParser getNewParser(InetAddress inetAddress, int port) {
-                return new InboundMessageQueuer(unitTestParams) {
-                    @Override public void connectionClosed() { }
-                    @Override
-                    public void connectionOpened() {
-                        newPeerWriteTargetQueue.offer(this);
-                    }
-                };
-            }
-        }, new InetSocketAddress("127.0.0.1", 2000));
-        peerServer.startAndWait();
+        startPeerServers();
         if (clientType == ClientType.NIO_CLIENT_MANAGER || clientType == ClientType.BLOCKING_CLIENT_MANAGER)
             channels.startAndWait();
 
         socketAddress = new InetSocketAddress("127.0.0.1", 1111);
     }
 
+    protected void startPeerServers() throws IOException {
+        for (int i = 0 ; i < PEER_SERVERS ; i++) {
+            startPeerServer(i);
+        }
+    }
+
+    protected void startPeerServer(int i) throws IOException {
+        peerServers[i] = new NioServer(new StreamParserFactory() {
+            @Nullable
+            @Override
+            public StreamParser getNewParser(InetAddress inetAddress, int port) {
+                return new InboundMessageQueuer(unitTestParams) {
+                    @Override
+                    public void connectionClosed() {
+                    }
+
+                    @Override
+                    public void connectionOpened() {
+                        newPeerWriteTargetQueue.offer(this);
+                    }
+                };
+            }
+        }, new InetSocketAddress("127.0.0.1", 2000 + i));
+        peerServers[i].startAndWait();
+    }
+
     public void tearDown() throws Exception {
         Wallet.SendRequest.DEFAULT_FEE_PER_KB = Transaction.REFERENCE_DEFAULT_MIN_TX_FEE;
-        peerServer.stopAndWait();
+        stopPeerServers();
+    }
+
+    protected void stopPeerServers() {
+        for (int i = 0 ; i < PEER_SERVERS ; i++)
+            stopPeerServer(i);
+    }
+
+    protected void stopPeerServer(int i) {
+        peerServers[i].stopAndWait();
     }
 
     protected InboundMessageQueuer connect(Peer peer, VersionMessage versionMessage) throws Exception {
@@ -117,8 +140,10 @@ public class TestWithNetworkConnections {
         peer.addEventListener(new AbstractPeerEventListener() {
             @Override
             public void onPeerDisconnected(Peer p, int peerCount) {
-                if (!doneConnecting.get())
-                    thisThread.interrupt();
+                synchronized (doneConnecting) {
+                    if (!doneConnecting.get())
+                        thisThread.interrupt();
+                }
             }
         });
         if (clientType == ClientType.NIO_CLIENT_MANAGER || clientType == ClientType.BLOCKING_CLIENT_MANAGER)
@@ -138,7 +163,10 @@ public class TestWithNetworkConnections {
         try {
             assertTrue(writeTarget.nextMessageBlocking() instanceof VersionMessage);
             assertTrue(writeTarget.nextMessageBlocking() instanceof VersionAck);
-            doneConnecting.set(true);
+            synchronized (doneConnecting) {
+                doneConnecting.set(true);
+            }
+            Thread.interrupted(); // Clear interrupted bit in case it was set before we got into the CS
         } catch (InterruptedException e) {
             // We were disconnected before we got back version/verack
         }
