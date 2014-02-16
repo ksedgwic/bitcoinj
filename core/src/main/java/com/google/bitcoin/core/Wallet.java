@@ -1424,6 +1424,35 @@ public class Wallet implements Serializable, BlockChainListener, PeerFilterProvi
         }
     }
 
+    public void cleanup() {
+        lock.lock();
+        try {
+            log.info("=========================================================================== cleanup()");
+            boolean dirty = false;
+            for (Iterator<Transaction> i = pending.values().iterator(); i.hasNext();) {
+                Transaction tx = i.next();
+                if (isTransactionRisky(tx, null) && !acceptRiskyTransactions) {
+                    log.info("Found risky transaction {} in wallet.", tx.getHashAsString());
+                    if (!tx.isAnyOutputSpent()) {
+                        // tx.disconnectInputs(); // just in case
+                        // i.remove();
+                        // transactions.remove(tx.getHash());
+                        dirty = true;
+                        log.info("[SIMULATION] Removed transaction {} from pending pool.", tx.getHashAsString());
+                    } else {
+                        log.info("Cannot remove transaction {} as it's already spent partially.", tx.getHashAsString());
+                    }
+                }
+            }
+            if (dirty)
+                saveLater();
+            else
+                log.info("No risky transactions removed.");
+        } finally {
+            lock.unlock();
+        }
+    }
+
     EnumSet<Pool> getContainingPools(Transaction tx) {
         lock.lock();
         try {
