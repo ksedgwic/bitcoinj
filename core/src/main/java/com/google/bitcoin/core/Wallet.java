@@ -1424,6 +1424,10 @@ public class Wallet implements Serializable, BlockChainListener, PeerFilterProvi
         }
     }
 
+    /**
+     * Cleanup risky pending transaction from the wallet.   Transactions will be cleaned up if they
+     * are risky and their outputs have not been spent.
+     */
     public void cleanup() {
         lock.lock();
         try {
@@ -1434,11 +1438,11 @@ public class Wallet implements Serializable, BlockChainListener, PeerFilterProvi
                 if (isTransactionRisky(tx, null) && !acceptRiskyTransactions) {
                     log.info("Found risky transaction {} in wallet.", tx.getHashAsString());
                     if (!tx.isAnyOutputSpent()) {
-                        // tx.disconnectInputs(); // just in case
-                        // i.remove();
-                        // transactions.remove(tx.getHash());
+                        tx.disconnectInputs();
+                        i.remove();
+                        transactions.remove(tx.getHash());
                         dirty = true;
-                        log.info("[SIMULATION] Removed transaction {} from pending pool.", tx.getHashAsString());
+                        log.info("Removed transaction {} from pending pool during cleanup.", tx.getHashAsString());
                     } else {
                         log.info("Cannot remove transaction {} as it's already spent partially.", tx.getHashAsString());
                     }
