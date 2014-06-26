@@ -64,12 +64,14 @@ public interface TransactionSigner {
 
     /**
      * Signature state listener
+     * 
+     * onDeferred can be called zero or more times, followed by onCanceled or onComplete.
      */
     public interface SignatureRequestListener {
-        void onComplete(String requestId, Transaction tx);
         void onDeferred(String requestId,
                         Set<VerificationType> requiredVerifications,
                         long untilMillis);
+        void onComplete(String requestId, Transaction tx);
         void onCanceled(String requestId, String reason);
     }
 }
