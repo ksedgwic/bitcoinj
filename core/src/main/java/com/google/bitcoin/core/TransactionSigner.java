@@ -1,130 +1,70 @@
 package com.google.bitcoin.core;
 
-import com.google.bitcoin.crypto.DeterministicKey;
-import com.google.bitcoin.wallet.KeyBag;
-
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.URI;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.UUID;
 
 public interface TransactionSigner {
+    public class ProposedTransaction {
+        private final Transaction.SigHash hashType;
+        private final boolean anyoneCanPay;
+        private final Transaction partialTransaction;
+        private final UUID proposalId; // Randomly generated
 
-    boolean requestSignature(Transaction.SigHash hashType,
-                             boolean anyoneCanPay,
-                             Transaction transaction,
-                             Set<Transaction> inputTransactions);
+        /**
+         * Used by deserialization.
+         */
+        public ProposedTransaction(Transaction.SigHash hashType,
+                                   boolean anyoneCanPay,
+                                   Transaction partialTransaction,
+                                   UUID proposalId) {
+            this.hashType = hashType;
+            this.anyoneCanPay = anyoneCanPay;
+            this.partialTransaction = partialTransaction;
+            this.proposalId = proposalId;
+        }
 
-    String cancelRequest(String requestId) throws IOException;
+        public ProposedTransaction(Transaction.SigHash hashType,
+                                   boolean anyoneCanPay,
+                                   Transaction partialTransaction) {
+            this(hashType, anyoneCanPay, partialTransaction, generateRandomProposalId());
+        }
 
-    String check(String requestId) throws IOException;
+        private static UUID generateRandomProposalId() {
+            return UUID.randomUUID();
+        }
 
-    void addListener(TransactionRequestListener listener);
+        public Transaction.SigHash getHashType() {
+            return hashType;
+        }
+
+        public boolean isAnyoneCanPay() {
+            return anyoneCanPay;
+        }
+
+        public Transaction getPartialTransaction() {
+            return partialTransaction;
+        }
+
+        public UUID getProposalId() {
+            return proposalId;
+        }
+    }
+
+    /**
+     * Request a signature on a transaction
+     *
+     * @return whether the signer was able to handle this request
+     */
+    boolean requestSignature(ProposedTransaction proposal) throws IOException;
+
+    void cancelRequest(ProposedTransaction proposal) throws IOException;
+
+    void addListener(RequestListener listener);
 
     /**
      * Transaction state listener
      */
-    public interface TransactionRequestListener {
-        void transactionComplete(String requestId, Transaction tx);
-        void transactionDeferred(String requestId,
-                                 Set<VerificationType> requiredVerifications,
-                                 long untilMillis);
-        void transactionCanceled(String requestId, String reason);
-    }
-}
-
-/**
- * @author devrandom
- */
-public interface TransactionSigner {
-    public interface RegistrationListener {
-        void phoneTypeDetected(String phoneId, boolean landline);
-        /** code to display to the user in order to validate the line */
-        void landlinePhoneCode(String phoneId, String code);
-        /** The registration is complete, and {@link com.google.bitcoin.core.TransactionSigner#getServiceKeys()} may now be called */
-        void registrationComplete();
-    }
-
-    /** Override default API endpoint */
-    void setEndpoint(URI uri);
-
-    /**
-     * Register with signing service, if required
-     *
-     * @param accountKeys public keys for wallet, recovery.  All derivation levels under
-     *                    this should be non-hardened.
-     * @param pii personal information if any, to be provided to service during registration
-     * @param parameters any parameters that customize the way the service will work with this wallet
-     */
-    void register(List<DeterministicKey> accountKeys,
-                  Object pii,
-                  Object parameters);
-
-    /** Connect to existing registration */
-    void connect(DeterministicKey accountKey);
-
-    /** Keys provided by the service, to marry with the user keys.  Can be called after registration is complete. */
-    List<DeterministicKey> getServiceKeys();
-
-    /** Serialize this signer */
-    void serialize(OutputStream stream);
-
-    /** Deserialize this signer */
-    void deserialize(InputStream stream);
-
-    public enum VerificationType {
-        OTP,
-        SMS,
-        CALL,
-        CAPTCHA
-    }
-
-    /** Get next fee destination address */
-    Address getFeeAddress();
-
-    /** Get the amount of fee required
-     *
-     * @param amount the amount that will be sent from the wallet
-     * @return the fee required for the amount
-     */
-    long getFeeForAmount(long amount);
-
-    /**
-     *
-     * @param hashType
-     * @param anyoneCanPay
-     * @param transaction the transaction
-     * @param requestId unique request ID for this spend
-     * @param inputTransactions input transactions to enable miner fee calculations
-     * @param masterKeys
-     * @param verifications SMS, OTP and other such
-     * @param keyBag a way to get keys involved in this transaction
-     * @return whether this signer was able to handle this transaction
-     */
-    boolean sendSignatureRequest(Transaction.SigHash hashType,
-                                 boolean anyoneCanPay,
-                                 Transaction transaction,
-                                 String requestId, // make this mandatory and skip the returned ID?
-                                 Set<Transaction> inputTransactions,
-                                 List<DeterministicKey> masterKeys,
-                                 Map<VerificationType, String> verifications,
-                                 KeyBag keyBag) throws IOException;
-    String cancelRequest(String requestId) throws IOException;
-    String check(String requestId) throws IOException;
-
-    void addListener(TransactionRequestListener listener);
-
-    /**
-     * Transaction state listener
-     */
-    public interface TransactionRequestListener {
-        void transactionComplete(String requestId, Transaction tx);
-        void transactionDeferred(String requestId,
-                                 Set<VerificationType> requiredVerifications,
-                                 long untilMillis);
-        void transactionCanceled(String requestId, String reason);
+    public interface RequestListener {
+        void requestComplete(UUID requestId, Transaction transaction);
     }
 }

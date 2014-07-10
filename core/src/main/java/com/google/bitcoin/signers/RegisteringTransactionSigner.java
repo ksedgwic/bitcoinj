@@ -1,6 +1,7 @@
-package com.google.bitcoin.core.signers;
+package com.google.bitcoin.signers;
 
 import com.google.bitcoin.core.Address;
+import com.google.bitcoin.core.TransactionSigner;
 import com.google.bitcoin.crypto.DeterministicKey;
 
 import java.util.List;
@@ -10,6 +11,13 @@ import java.util.Map;
  * @author devrandom
  */
 public interface RegisteringTransactionSigner extends TransactionSigner {
+    public enum VerificationType {
+        OTP,
+        SMS,
+        CALL,
+        CAPTCHA
+    }
+
     /**
      * Register with signing service, if required
      *
@@ -56,7 +64,7 @@ public interface RegisteringTransactionSigner extends TransactionSigner {
          *                              null if !landline
          */
         void onPhoneTypeDetected(String phoneId, boolean landline, String phoneVerificationCode);
-        /** The registration is complete, and {@link com.google.bitcoin.core.signers.TransactionSigner#getServiceKeys()} may now be called */
+        /** The registration is complete, and {@link RegisteringTransactionSigner#getServiceKeys()} may now be called */
         void onRegistrationComplete();
     }
 }
