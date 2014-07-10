@@ -11,6 +11,31 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+public interface TransactionSigner {
+
+    boolean requestSignature(Transaction.SigHash hashType,
+                             boolean anyoneCanPay,
+                             Transaction transaction,
+                             Set<Transaction> inputTransactions);
+
+    String cancelRequest(String requestId) throws IOException;
+
+    String check(String requestId) throws IOException;
+
+    void addListener(TransactionRequestListener listener);
+
+    /**
+     * Transaction state listener
+     */
+    public interface TransactionRequestListener {
+        void transactionComplete(String requestId, Transaction tx);
+        void transactionDeferred(String requestId,
+                                 Set<VerificationType> requiredVerifications,
+                                 long untilMillis);
+        void transactionCanceled(String requestId, String reason);
+    }
+}
+
 /**
  * @author devrandom
  */
