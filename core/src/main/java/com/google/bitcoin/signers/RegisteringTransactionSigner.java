@@ -1,6 +1,7 @@
 package com.google.bitcoin.signers;
 
 import com.google.bitcoin.core.Address;
+import com.google.bitcoin.core.Coin;
 import com.google.bitcoin.core.TransactionSigner;
 import com.google.bitcoin.crypto.DeterministicKey;
 
@@ -52,7 +53,7 @@ public interface RegisteringTransactionSigner extends TransactionSigner {
      * @param amount the amount that will be sent from the wallet
      * @return the fee required for the amount
      */
-    long getFeeForAmount(long amount);
+    Coin getFeeForAmount(Coin amount);
 
     public interface RegistrationListener {
         /**
